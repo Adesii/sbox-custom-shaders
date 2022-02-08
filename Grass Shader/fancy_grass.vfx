@@ -1,0 +1,214 @@
+//=========================================================================================================================
+// Optional
+//=========================================================================================================================
+HEADER
+{
+	CompileTargets = ( IS_SM_50 && ( PC || VULKAN ) );
+	Description = "Grass Shader";
+	DevShader = true;
+	DebugInfo = false;
+}
+
+//=========================================================================================================================
+// Optional
+//=========================================================================================================================
+FEATURES
+{
+    #include "common/features.hlsl"
+	Feature(F_ADDITIVE_BLEND, 0..1, "Blending");
+	Feature( F_ALPHA_TEST, 0..1, "Rendering" );
+    Feature( F_TRANSMISSIVE, 0..1, "Rendering" );
+
+	Feature(F_TRIPLANAR_GROUND, 0..1(0="Color", 1="Triplanar"), "Ground");
+}
+
+//=========================================================================================================================
+// Optional
+//=========================================================================================================================
+MODES
+{
+    VrForward();													// Indicates this shader will be used for main rendering
+    Depth( "vr_depth_only.vfx" ); 									// Shader that will be used for shadowing and depth prepass
+    ToolsVis( S_MODE_TOOLS_VIS ); 									// Ability to see in the editor
+    ToolsWireframe( "vr_tools_wireframe.vfx" ); 					// Allows for mat_wireframe to work
+	ToolsShadingComplexity( "vr_tools_shading_complexity.vfx" ); 	// Shows how expensive drawing is in debug view
+}
+
+//=========================================================================================================================
+COMMON
+{
+	#include "common/shared.hlsl"
+
+
+	float3 BaseColor<UiType(Color);UiGroup("Blade,10/Colors,10/1");Default3(0.0196078,0.333333,0.0666667);>;
+	float3 TipColor<UiType(Color);UiGroup("Blade,10/Colors,10/2");Default3(0.192157,0.882353,0.203922);>;
+
+
+	float GrassThreshold<UiType(Slider);Range(-0.1,1);Default(0.5);>;
+	float GrassFalloff<UiType(Slider);UiGroup("Blade,10/Grass,10/1");Range(0,0.5);Default(0.05);>;
+
+	
+
+
+	#define CULL_MODE_ALREADY_SET
+	#define VS_INPUT_HAS_TANGENT_BASIS 1
+    #define PS_INPUT_HAS_TANGENT_BASIS 1
+
+	#define BLADE_SEGMENTS 4
+
+	#define DISTANCE_BASED_TESS 1
+	#define NO_TESSELATION 0
+
+	//#define D_BAKED_LIGHTING_FROM_PROBE 1
+}
+
+//=========================================================================================================================
+
+struct VertexInput
+{
+	#include "common/vertexinput.hlsl"
+};
+
+//=========================================================================================================================
+
+struct PixelInput
+{
+	#include "fancy_grass.pixelinput.hlsl"
+};
+
+//=========================================================================================================================
+struct GeometryInput
+{
+	#include "fancy_grass.pixelinput.hlsl"
+};
+
+struct HullInput
+{
+    #include "fancy_grass.pixelinput.hlsl"
+};
+
+struct HullOutput
+{
+    #include "fancy_grass.pixelinput.hlsl"
+};
+
+struct HullPatchConstants
+{
+	float Edge[3] : SV_TessFactor;
+	float Inside : SV_InsideTessFactor;
+};
+
+struct DomainInput
+{
+	#include "fancy_grass.pixelinput.hlsl"
+};
+
+//=========================================================================================================================
+
+VS
+{
+	#include "common/vertex.hlsl"
+	//
+	// Main
+	//
+	PixelInput MainVs( INSTANCED_SHADER_PARAMS( VS_INPUT i ) )
+	{
+		PixelInput o = ProcessVertex( i );
+		o.worldspace = o.vPositionWs;
+		o.worldspacenormals = o.vNormalWs;
+		o.worldspacevTangentUWs = o.vTangentUWs;
+		return FinalizeVertex(o);
+	}
+}
+
+HS
+{
+	#include "common/hull.hlsl"
+	#include "fancy_grass.tesselation.hlsl"
+}
+
+DS
+{
+	#include "fancy_grass.tesselation.hlsl"
+}
+
+//=========================================================================================================================
+
+GS
+{
+	#include "fancy_grass.Geometry.hlsl"
+}
+
+//=========================================================================================================================
+
+PS
+{
+    #include "common/pixel.hlsl"
+
+
+	StaticCombo( S_TRIPLANAR, F_TRIPLANAR_GROUND, Sys( PC ) );
+
+	CreateInputTexture2D(BladeTexture,Srgb,8,"","_color","Blade,10/Colors,10/1",Default3( 1.0, 1.0, 1.0 ) );
+	CreateTexture2DWithoutSampler( g_tBladeTexture )  < Channel( RGB,  Box( BladeTexture ), Srgb ); Channel( A, Box( TextureTintMask ), Linear ); OutputFormat( BC7 ); SrgbRead( true ); >;
+
+
+
+	RenderState(CullMode, NONE);
+
+	float TextureScale < Default( 10 ); Range( 0, 1000.0 ); UiGroup( "Triplanar,90" ); >;
+	float TextureBlendSoftness < Default( 1 ); Range( 0, 100.0 ); UiGroup( "Triplanar,90" ); >;
+
+	Material TriplanarMaterial(PixelInput i,Texture2D color,Texture2D norm,Texture2D rma,float3 tintcolor,float scale,float softness){
+			float2 yUV = i.worldspace.xz / scale;
+			float2 xUV = i.worldspace.zy / scale;
+			float2 zUV = i.worldspace.xy / scale;
+			// Now do texture samples from our diffuse map with each of the 3 UV set's we've just made.
+			float4 yDiff = Tex2DS(color,TextureFiltering, yUV);
+			float4 xDiff = Tex2DS(color,TextureFiltering, xUV);
+			float4 zDiff = Tex2DS(color,TextureFiltering, zUV);
+
+			float4 yNorm = Tex2DS(norm,TextureFiltering, yUV);
+			float4 xNorm = Tex2DS(norm,TextureFiltering, xUV);
+			float4 zNorm = Tex2DS(norm,TextureFiltering, zUV);
+
+			float4 yRma = Tex2DS(rma,TextureFiltering, yUV);
+			float4 xRma = Tex2DS(rma,TextureFiltering, xUV);
+			float4 zRma = Tex2DS(rma,TextureFiltering, zUV);
+			// Get the absolute value of the world normal.
+			// Put the blend weights to the power of BlendSharpness, the higher the value, 
+            // the sharper the transition between the planar maps will be.
+			float3 blendWeights = pow (abs(i.vNormalWs), softness);
+			// Divide our blend mask by the sum of it's components, this will make x+y+z=1
+			blendWeights = blendWeights / (blendWeights.x + blendWeights.y + blendWeights.z);
+			// Finally, blend together all three samples based on the blend mask.
+			float4 dif = xDiff * blendWeights.x + yDiff * blendWeights.y + zDiff * blendWeights.z;
+			float4 norms = xNorm * blendWeights.x + yNorm * blendWeights.y + zNorm * blendWeights.z;
+			float4 rough = xRma * blendWeights.x + yRma * blendWeights.y + zRma * blendWeights.z;
+			return ToMaterial(dif,norms,rough,tintcolor);
+
+	}
+	
+
+	//
+	// Main
+	//
+	PixelOutput MainPs( PixelInput i )
+	{
+
+		//Material m = GatherMaterial(i);
+		#if S_TRIPLANAR
+			Material m = TriplanarMaterial(i,g_tColor,g_tNormal,g_tRma,g_flTintColor,TextureScale,TextureBlendSoftness);
+		#else
+			Material m = ToMaterial(float4(BaseColor,1),Tex2DS( g_tNormal, TextureFiltering, i.vTextureCoords  ),float4(1,0,1,0));
+		#endif
+
+		if(i.vTextureCoords.x != 0 && i.vTextureCoords.y != 0)
+			m.Albedo = Tex2DS( g_tBladeTexture, TextureFiltering, i.vTextureCoords  ), 
+			m.Albedo *= saturate( lerp( BaseColor, TipColor, clamp(i.vTextureCoords.y,0,1) ));
+		PixelOutput o;
+		o.vColor.a = 1;
+		o.vColor.rgb = FinalizePixelMaterial( i, m ).vColor.rgb;
+
+		return o;//FinalizePixelMaterial( i, m );
+	}
+}
