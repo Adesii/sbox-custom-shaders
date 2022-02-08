@@ -12,7 +12,7 @@ float RandRotation<UiType(Slider);UiGroup("Blade,10/Blades,10/6");Range(0,1);Def
 float GrassPatchDist<UiType(Slider);UiGroup("Blade,10/Grass,10/2");Range(0,100);Default(20);>;
 
 #include "common/proceedural.hlsl"
-#include "noise3D.hlsl"
+#include "Grass/noise3D.hlsl"
 
 
 CreateInputTexture2D(WindMap,Linear, 8,"NormalizeNormals","_normal","Blade,10/Wind,10/1", Default3( 0.5, 0.5, 1.0 ) );

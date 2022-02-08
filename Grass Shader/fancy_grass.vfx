@@ -73,23 +73,23 @@ struct VertexInput
 
 struct PixelInput
 {
-	#include "fancy_grass.pixelinput.hlsl"
+	#include "Grass/fancy_grass.pixelinput.hlsl"
 };
 
 //=========================================================================================================================
 struct GeometryInput
 {
-	#include "fancy_grass.pixelinput.hlsl"
+	#include "Grass/fancy_grass.pixelinput.hlsl"
 };
 
 struct HullInput
 {
-    #include "fancy_grass.pixelinput.hlsl"
+    #include "Grass/fancy_grass.pixelinput.hlsl"
 };
 
 struct HullOutput
 {
-    #include "fancy_grass.pixelinput.hlsl"
+    #include "Grass/fancy_grass.pixelinput.hlsl"
 };
 
 struct HullPatchConstants
@@ -100,7 +100,7 @@ struct HullPatchConstants
 
 struct DomainInput
 {
-	#include "fancy_grass.pixelinput.hlsl"
+	#include "Grass/fancy_grass.pixelinput.hlsl"
 };
 
 //=========================================================================================================================
@@ -124,19 +124,19 @@ VS
 HS
 {
 	#include "common/hull.hlsl"
-	#include "fancy_grass.tesselation.hlsl"
+	#include "Grass/fancy_grass.tesselation.hlsl"
 }
 
 DS
 {
-	#include "fancy_grass.tesselation.hlsl"
+	#include "Grass/fancy_grass.tesselation.hlsl"
 }
 
 //=========================================================================================================================
 
 GS
 {
-	#include "fancy_grass.Geometry.hlsl"
+	#include "Grass/fancy_grass.Geometry.hlsl"
 }
 
 //=========================================================================================================================
