@@ -20,6 +20,13 @@ FEATURES
     Feature( F_TRANSMISSIVE, 0..1, "Rendering" );
 
 	Feature(F_TRIPLANAR_GROUND, 0..1(0="Color", 1="Triplanar"), "Ground");
+
+	
+	//Feature( F_HIGH_QUALITY_REFLECTIONS, 0..1, "Rendering" );
+
+	// 5 layers puts too much pressure into registers, I'm keeping it to 4 but modders can experiment with it
+    Feature( F_MULTIBLEND, 0..3 ( 0="1 Layers", 1="2 Layers", 2="3 Layers", 3="4 Layers" ), "Number Of Blendable Layers" );
+	Feature( F_USE_TINT_MASKS_IN_VERTEX_PAINT, 0..1, "Use Tint Masks In Vertex Paint" );
 }
 
 //=========================================================================================================================
@@ -32,6 +39,8 @@ MODES
     ToolsVis( S_MODE_TOOLS_VIS ); 									// Ability to see in the editor
     ToolsWireframe( "vr_tools_wireframe.vfx" ); 					// Allows for mat_wireframe to work
 	ToolsShadingComplexity( "vr_tools_shading_complexity.vfx" ); 	// Shows how expensive drawing is in debug view
+
+	//Reflection( "high_quality_reflections.vfx" );
 }
 
 //=========================================================================================================================
@@ -47,10 +56,16 @@ COMMON
 	float GrassThreshold<UiType(Slider);Range(-0.1,1);Default(0.5);>;
 	float GrassFalloff<UiType(Slider);UiGroup("Blade,10/Grass,10/1");Range(0,0.5);Default(0.05);>;
 
+
+	
+
 	
 
 
 	#define CULL_MODE_ALREADY_SET
+	#define BLEND_MODE_ALREADY_SET
+
+
 	#define VS_INPUT_HAS_TANGENT_BASIS 1
     #define PS_INPUT_HAS_TANGENT_BASIS 1
 
@@ -66,6 +81,8 @@ COMMON
 
 struct VertexInput
 {
+	float4 vColorBlendValues : TEXCOORD4 < Semantic( VertexPaintBlendParams ); >;
+	float4 vColorPaintValues : TEXCOORD5 < Semantic( VertexPaintTintColor ); >;
 	#include "common/vertexinput.hlsl"
 };
 
@@ -108,6 +125,32 @@ struct DomainInput
 VS
 {
 	#include "common/vertex.hlsl"
+
+	BoolAttribute( VertexPaintUI2Layer, F_MULTIBLEND == 1 );
+	BoolAttribute( VertexPaintUI3Layer, F_MULTIBLEND == 2 );
+	BoolAttribute( VertexPaintUI4Layer, F_MULTIBLEND == 3 );
+	BoolAttribute( VertexPaintUI5Layer, F_MULTIBLEND == 4 );
+	BoolAttribute( VertexPaintUIPickColor, true );
+
+	StaticCombo( S_MULTIBLEND, F_MULTIBLEND, Sys( PC ) );
+	#if S_MULTIBLEND >= 1
+	float g_flGrassModifierB < Default( 1 ); Range( 0, 1.0 ); UiGroup( "Material B,90" ); >;
+	#if S_MULTIBLEND >= 2
+	float g_flGrassModifierC < Default( 1 ); Range( 0, 1.0 ); UiGroup( "Material C,90" ); >;
+	#if S_MULTIBLEND >= 3
+	float g_flGrassModifierD < Default( 1 ); Range( 0, 1.0 ); UiGroup( "Material D,90" ); >;
+	#if S_MULTIBLEND >= 4
+	float g_flGrassModifierE < Default( 1 ); Range( 0, 1.0 ); UiGroup( "Material E,90" ); >;
+	#endif
+	#endif
+	#endif
+	#endif
+
+
+	
+
+	
+	//BoolAttribute( UsesHighQualityReflections, ( F_HIGH_QUALITY_REFLECTIONS > 0 ) );
 	//
 	// Main
 	//
@@ -117,6 +160,23 @@ VS
 		o.worldspace = o.vPositionWs;
 		o.worldspacenormals = o.vNormalWs;
 		o.worldspacevTangentUWs = o.vTangentUWs;
+
+		o.vBlendValues = i.vColorBlendValues;
+        o.vPaintValues = i.vColorPaintValues;
+		o.vGrassValues = float4(0,0,0,0);
+		#if S_MULTIBLEND >= 1
+		o.vGrassValues.x = g_flGrassModifierB;
+		#if S_MULTIBLEND >= 2
+		o.vGrassValues.y = g_flGrassModifierC;
+		#if S_MULTIBLEND >= 3
+		o.vGrassValues.z = g_flGrassModifierD;
+		#if S_MULTIBLEND >= 4
+		o.vGrassValues.w = g_flGrassModifierE;
+		#endif
+		#endif
+		#endif
+		#endif
+
 		return FinalizeVertex(o);
 	}
 }
@@ -136,6 +196,8 @@ DS
 
 GS
 {
+	StaticCombo( S_MULTIBLEND, F_MULTIBLEND, Sys( PC ) );
+	//StaticCombo( S_HIGH_QUALITY_REFLECTIONS, F_HIGH_QUALITY_REFLECTIONS, Sys( PC ) ); // Indicate that Shader supports high quality reflections
 	#include "Grass/fancy_grass.Geometry.hlsl"
 }
 
@@ -143,7 +205,24 @@ GS
 
 PS
 {
+
+	
+
+	//
+	// Combos
+	//
+	StaticCombo( S_MULTIBLEND, F_MULTIBLEND, Sys( PC ) );
+    StaticCombo( S_USE_TINT_MASKS_IN_VERTEX_PAINT, F_USE_TINT_MASKS_IN_VERTEX_PAINT, Sys( PC ) );
+
     #include "common/pixel.hlsl"
+	#include "common/pixel.blend.hlsl"
+
+	RenderState( BlendEnable,  false );
+	RenderState( SrcBlend, ONE );
+	RenderState( DstBlend, ZERO );
+
+	
+	//StaticCombo( S_HIGH_QUALITY_REFLECTIONS, F_HIGH_QUALITY_REFLECTIONS, Sys( PC ) ); // Indicate that Shader supports high quality reflections
 
 
 	StaticCombo( S_TRIPLANAR, F_TRIPLANAR_GROUND, Sys( PC ) );
@@ -155,39 +234,7 @@ PS
 
 	RenderState(CullMode, NONE);
 
-	float TextureScale < Default( 10 ); Range( 0, 1000.0 ); UiGroup( "Triplanar,90" ); >;
-	float TextureBlendSoftness < Default( 1 ); Range( 0, 100.0 ); UiGroup( "Triplanar,90" ); >;
-
-	Material TriplanarMaterial(PixelInput i,Texture2D color,Texture2D norm,Texture2D rma,float3 tintcolor,float scale,float softness){
-			float2 yUV = i.worldspace.xz / scale;
-			float2 xUV = i.worldspace.zy / scale;
-			float2 zUV = i.worldspace.xy / scale;
-			// Now do texture samples from our diffuse map with each of the 3 UV set's we've just made.
-			float4 yDiff = Tex2DS(color,TextureFiltering, yUV);
-			float4 xDiff = Tex2DS(color,TextureFiltering, xUV);
-			float4 zDiff = Tex2DS(color,TextureFiltering, zUV);
-
-			float4 yNorm = Tex2DS(norm,TextureFiltering, yUV);
-			float4 xNorm = Tex2DS(norm,TextureFiltering, xUV);
-			float4 zNorm = Tex2DS(norm,TextureFiltering, zUV);
-
-			float4 yRma = Tex2DS(rma,TextureFiltering, yUV);
-			float4 xRma = Tex2DS(rma,TextureFiltering, xUV);
-			float4 zRma = Tex2DS(rma,TextureFiltering, zUV);
-			// Get the absolute value of the world normal.
-			// Put the blend weights to the power of BlendSharpness, the higher the value, 
-            // the sharper the transition between the planar maps will be.
-			float3 blendWeights = pow (abs(i.vNormalWs), softness);
-			// Divide our blend mask by the sum of it's components, this will make x+y+z=1
-			blendWeights = blendWeights / (blendWeights.x + blendWeights.y + blendWeights.z);
-			// Finally, blend together all three samples based on the blend mask.
-			float4 dif = xDiff * blendWeights.x + yDiff * blendWeights.y + zDiff * blendWeights.z;
-			float4 norms = xNorm * blendWeights.x + yNorm * blendWeights.y + zNorm * blendWeights.z;
-			float4 rough = xRma * blendWeights.x + yRma * blendWeights.y + zRma * blendWeights.z;
-			return ToMaterial(dif,norms,rough,tintcolor);
-
-	}
-	
+	#include "Grass/fancy_grass.blend.hlsl"
 
 	//
 	// Main
@@ -197,7 +244,7 @@ PS
 
 		//Material m = GatherMaterial(i);
 		#if S_TRIPLANAR
-			Material m = TriplanarMaterial(i,g_tColor,g_tNormal,g_tRma,g_flTintColor,TextureScale,TextureBlendSoftness);
+			Material m = TriplanarToMaterialMultiblend(i);
 		#else
 			Material m = ToMaterial(float4(BaseColor,1),Tex2DS( g_tNormal, TextureFiltering, i.vTextureCoords  ),float4(1,0,1,0));
 		#endif
@@ -205,10 +252,10 @@ PS
 		if(i.vTextureCoords.x != 0 && i.vTextureCoords.y != 0)
 			m.Albedo = Tex2DS( g_tBladeTexture, TextureFiltering, i.vTextureCoords  ), 
 			m.Albedo *= saturate( lerp( BaseColor, TipColor, clamp(i.vTextureCoords.y,0,1) ));
-		PixelOutput o;
-		o.vColor.a = 1;
-		o.vColor.rgb = FinalizePixelMaterial( i, m ).vColor.rgb;
+		//PixelOutput o;
+		//o.vColor.a = 1;
+		//o.vColor.rgb = FinalizePixelMaterial( i, m ).vColor.rgb;
 
-		return o;//FinalizePixelMaterial( i, m );
+		return FinalizePixelMaterial( i, m );
 	}
 }

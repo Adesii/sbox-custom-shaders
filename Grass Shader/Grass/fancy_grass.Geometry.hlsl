@@ -13,6 +13,7 @@ float GrassPatchDist<UiType(Slider);UiGroup("Blade,10/Grass,10/2");Range(0,100);
 
 #include "common/proceedural.hlsl"
 #include "Grass/noise3D.hlsl"
+//#include "Grass/fancy_grass.SDFCollisions.hlsl"
 
 
 CreateInputTexture2D(WindMap,Linear, 8,"NormalizeNormals","_normal","Blade,10/Wind,10/1", Default3( 0.5, 0.5, 1.0 ) );
@@ -93,6 +94,19 @@ float GetDistanceFalloff(float3 pos,float3 vertpos,float mindist,float maxdist,f
 }
 
 
+//get float from 2 float4 where the x is the biggest and return x2
+float GetBiggestFloat(float4 v){
+	return max(v.x,max(v.y,max(v.z,v.w)));
+}
+
+#include "texture_blending.fxc"
+float getfalloff(float a, float b){
+	float fBlendfactor = ComputeBlendWeight( b, 1, 0.5 );
+    return lerp( 1, a, fBlendfactor); 
+}
+
+
+
 void GenerateGrass(triangle GeometryInput i[3],int index, inout TriangleStream< PS_INPUT > triStream){
 
     float3 pos = i[index].worldspace.xyz/100;
@@ -116,8 +130,23 @@ void GenerateGrass(triangle GeometryInput i[3],int index, inout TriangleStream< 
 	float3x3 tipTransformationMatrix = mul(mul(windMatrix,randBendMatrix),randRotMatrix);
 
 	float falloffamount = GetDistanceFalloff(pos,g_vCameraPositionWs/100,GrassCutoffDistance*0.005,GrassCutoffDistance*0.01,GrassCutoffDistanceFalloff);
+	if(length(i[index].vBlendValues)> 0){
+		#if S_MULTIBLEND >= 1
+		falloffamount *=getfalloff(i[index].vGrassValues.r,i[index].vBlendValues.r);
+		#if S_MULTIBLEND >= 2
+		falloffamount *=getfalloff(i[index].vGrassValues.g,i[index].vBlendValues.g);
+		#if S_MULTIBLEND >= 3
+		falloffamount *=getfalloff(i[index].vGrassValues.b,i[index].vBlendValues.b);
+		#if S_MULTIBLEND >= 4
+		falloffamount *=getfalloff(i[index].vGrassValues.a,i[index].vBlendValues.a);
+		#endif //1
+		#endif //2
+		#endif //3
+		#endif //4
+	}
     float width  = lerp(BladeWidth.x, BladeWidth.y*10, rand(pos.xyz) * GrassFalloff)* falloffamount;
 	float height = lerp(BladeLenght.x, BladeLenght.y*10, rand(pos.yzx) * GrassFalloff)* falloffamount;
+	//float height =  TraceSDF(i[index])*10;
 	float forward = rand(pos.zzy) * BladeBendDistance;
 
 

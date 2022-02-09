@@ -155,6 +155,10 @@
 		Baycentric3Interpolate(worldspacenormals);
 		Baycentric3Interpolate(worldspacevTangentUWs);
 
+		Baycentric3Interpolate(vBlendValues);
+		Baycentric3Interpolate(vPaintValues);
+		Baycentric3Interpolate(vGrassValues);
+
 
 		return o;
 	}
