@@ -2,9 +2,10 @@ float TextureScale < Default( 10 ); Range( 0, 1000.0 ); UiGroup( "Triplanar,90" 
 	float TextureBlendSoftness < Default( 1 ); Range( 0, 100.0 ); UiGroup( "Triplanar,90" ); >;
 
 	Material TriplanarMaterial(PixelInput i,Texture2D color,Texture2D norm,Texture2D rma,float3 tintcolor,float scale,float softness){
-			float2 yUV = i.worldspace.xz / scale;
-			float2 xUV = i.worldspace.zy / scale;
-			float2 zUV = i.worldspace.xy / scale;
+			float3 vPositionWs = i.vPositionWithOffsetWs.xyz + g_vCameraPositionWs;
+			float2 yUV = vPositionWs.xz / scale;
+			float2 xUV = vPositionWs.zy / scale;
+			float2 zUV = vPositionWs.xy / scale;
 			// Now do texture samples from our diffuse map with each of the 3 UV set's we've just made.
 			float4 yDiff = Tex2DS(color,TextureFiltering, yUV);
 			float4 xDiff = Tex2DS(color,TextureFiltering, xUV);

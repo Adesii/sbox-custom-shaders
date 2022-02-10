@@ -15,18 +15,18 @@ HEADER
 FEATURES
 {
     #include "common/features.hlsl"
-	Feature(F_ADDITIVE_BLEND, 0..1, "Blending");
-	Feature( F_ALPHA_TEST, 0..1, "Rendering" );
-    Feature( F_TRANSMISSIVE, 0..1, "Rendering" );
+	//Feature(F_ADDITIVE_BLEND, 0..1, "Blending");
+	//Feature( F_ALPHA_TEST, 0..1, "Rendering" );
+    //Feature( F_TRANSMISSIVE, 0..1, "Rendering" );
 
-	Feature(F_TRIPLANAR_GROUND, 0..1(0="Color", 1="Triplanar"), "Ground");
+	Feature(F_TRIPLANAR_GROUND, 0..2(0="UV Blend",1="Color", 2="Triplanar"), "Ground");
 
 	
 	//Feature( F_HIGH_QUALITY_REFLECTIONS, 0..1, "Rendering" );
 
 	// 5 layers puts too much pressure into registers, I'm keeping it to 4 but modders can experiment with it
     Feature( F_MULTIBLEND, 0..3 ( 0="1 Layers", 1="2 Layers", 2="3 Layers", 3="4 Layers" ), "Number Of Blendable Layers" );
-	Feature( F_USE_TINT_MASKS_IN_VERTEX_PAINT, 0..1, "Use Tint Masks In Vertex Paint" );
+	//Feature( F_USE_TINT_MASKS_IN_VERTEX_PAINT, 0..1, "Use Tint Masks In Vertex Paint" );
 }
 
 //=========================================================================================================================
@@ -35,7 +35,7 @@ FEATURES
 MODES
 {
     VrForward();													// Indicates this shader will be used for main rendering
-    Depth( "vr_depth_only.vfx" ); 									// Shader that will be used for shadowing and depth prepass
+    Depth( "vr_depth_only.vfx" ); 										// Shader that will be used for shadowing and depth prepass
     ToolsVis( S_MODE_TOOLS_VIS ); 									// Ability to see in the editor
     ToolsWireframe( "vr_tools_wireframe.vfx" ); 					// Allows for mat_wireframe to work
 	ToolsShadingComplexity( "vr_tools_shading_complexity.vfx" ); 	// Shows how expensive drawing is in debug view
@@ -61,7 +61,6 @@ COMMON
 
 	
 
-
 	#define CULL_MODE_ALREADY_SET
 	#define BLEND_MODE_ALREADY_SET
 
@@ -73,6 +72,14 @@ COMMON
 
 	#define DISTANCE_BASED_TESS 1
 	#define NO_TESSELATION 0
+
+	#define ENABLE_BINDLESS_RUNTIME
+	#define S_GGX_SHADING 1
+	#define S_SPECULAR 1
+	#define S_METALNESS_TEXTURE 0
+	#define S_SPECULAR_CUBE_MAP 1
+	#define S_TRANSLUCENT 0
+	#define S_ALPHA_TEST 0
 
 	//#define D_BAKED_LIGHTING_FROM_PROBE 1
 }
@@ -91,6 +98,7 @@ struct VertexInput
 struct PixelInput
 {
 	#include "Grass/fancy_grass.pixelinput.hlsl"
+	
 };
 
 //=========================================================================================================================
@@ -157,9 +165,6 @@ VS
 	PixelInput MainVs( INSTANCED_SHADER_PARAMS( VS_INPUT i ) )
 	{
 		PixelInput o = ProcessVertex( i );
-		o.worldspace = o.vPositionWs;
-		o.worldspacenormals = o.vNormalWs;
-		o.worldspacevTangentUWs = o.vTangentUWs;
 
 		o.vBlendValues = i.vColorBlendValues;
         o.vPaintValues = i.vColorPaintValues;
@@ -212,7 +217,9 @@ PS
 	// Combos
 	//
 	StaticCombo( S_MULTIBLEND, F_MULTIBLEND, Sys( PC ) );
-    StaticCombo( S_USE_TINT_MASKS_IN_VERTEX_PAINT, F_USE_TINT_MASKS_IN_VERTEX_PAINT, Sys( PC ) );
+	
+    //StaticCombo( S_USE_TINT_MASKS_IN_VERTEX_PAINT, F_USE_TINT_MASKS_IN_VERTEX_PAINT, Sys( PC ) );
+
 
     #include "common/pixel.hlsl"
 	#include "common/pixel.blend.hlsl"
@@ -221,6 +228,13 @@ PS
 	RenderState( SrcBlend, ONE );
 	RenderState( DstBlend, ZERO );
 
+	RenderState(CullMode,NONE);
+
+
+	RenderState( DepthBias, -10 ); // Value is steps in depth buffer (i.e. out of 2^24 if the depth buffer is 24 bit)
+	RenderState( SlopeScaleDepthBias, -0.2 );
+
+
 	
 	//StaticCombo( S_HIGH_QUALITY_REFLECTIONS, F_HIGH_QUALITY_REFLECTIONS, Sys( PC ) ); // Indicate that Shader supports high quality reflections
 
@@ -228,11 +242,14 @@ PS
 	StaticCombo( S_TRIPLANAR, F_TRIPLANAR_GROUND, Sys( PC ) );
 
 	CreateInputTexture2D(BladeTexture,Srgb,8,"","_color","Blade,10/Colors,10/1",Default3( 1.0, 1.0, 1.0 ) );
-	CreateTexture2DWithoutSampler( g_tBladeTexture )  < Channel( RGB,  Box( BladeTexture ), Srgb ); Channel( A, Box( TextureTintMask ), Linear ); OutputFormat( BC7 ); SrgbRead( true ); >;
+	CreateTexture2DWithoutSampler( g_tBladeTexture )  < Channel( RGBA,  Box( BladeTexture ), Srgb ); OutputFormat( BC7 ); SrgbRead( true ); >;
 
-
-
-	RenderState(CullMode, NONE);
+	
+	//#if ( S_MODE_TOOLS_WIREFRAME )
+	//{
+	//RenderState( FillMode, WIREFRAME );
+	//}
+	//#endif
 
 	#include "Grass/fancy_grass.blend.hlsl"
 
@@ -241,20 +258,20 @@ PS
 	//
 	PixelOutput MainPs( PixelInput i )
 	{
-
 		//Material m = GatherMaterial(i);
-		#if S_TRIPLANAR
-			Material m = TriplanarToMaterialMultiblend(i);
-		#else
+		#if S_TRIPLANAR == 0
+			Material m = ToMaterialMultiblend(i.vTextureCoords,i);
+		#elif S_TRIPLANAR == 1
 			Material m = ToMaterial(float4(BaseColor,1),Tex2DS( g_tNormal, TextureFiltering, i.vTextureCoords  ),float4(1,0,1,0));
+		#else
+			Material m = TriplanarToMaterialMultiblend(i);
 		#endif
 
-		if(i.vTextureCoords.x != 0 && i.vTextureCoords.y != 0)
-			m.Albedo = Tex2DS( g_tBladeTexture, TextureFiltering, i.vTextureCoords  ), 
-			m.Albedo *= saturate( lerp( BaseColor, TipColor, clamp(i.vTextureCoords.y,0,1) ));
-		//PixelOutput o;
-		//o.vColor.a = 1;
-		//o.vColor.rgb = FinalizePixelMaterial( i, m ).vColor.rgb;
+
+		if(i.vBladeUV.x != 0 && i.vBladeUV.y != 0){
+			m.Albedo = Tex2DS( g_tBladeTexture, TextureFiltering, i.vBladeUV  ), 
+			m.Albedo *= saturate( lerp( BaseColor, TipColor, clamp(i.vBladeUV.y,0,1) ));
+		}
 
 		return FinalizePixelMaterial( i, m );
 	}

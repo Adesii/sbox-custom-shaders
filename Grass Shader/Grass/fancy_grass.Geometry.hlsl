@@ -69,14 +69,17 @@ float3 projection(float3 vec, float3 norm){
 
 
 
-PS_INPUT TransformGeomToClip(GeometryInput i,float3 offset,float3x3 transmatrix,float2 uv){
+PS_INPUT TransformGeomToClip(GeometryInput i,int index,float3 offset,float3x3 transmatrix,float2 uv){
 	PS_INPUT o = (PS_INPUT)i;
 	float3 transformedpos = float3(0,0,0);
-	transformedpos.x += snoise(float3(i.worldspace.xy/90,0+i.worldspace.z/90))*(GrassPatchDist);
-	transformedpos.y += snoise(float3(i.worldspace.yx/90,100+i.worldspace.z/90))*(GrassPatchDist);
-	i.worldspace += projection(transformedpos,i.worldspacenormals);
-	o.vPositionPs = Position3WsToPs(i.worldspace + mul( offset.xyz,transmatrix));
-	o.vTextureCoords = uv;
+	float4 vPositionWs = mul( g_matProjectionToWorld, i.vPositionPs );
+	float3 pos = (i.vPositionWs+g_vCameraPositionWs)/100;
+	transformedpos.x += snoise(float3(pos.xy*((index+1)*10),pos.z*((index+1)*10)))*(GrassPatchDist);
+	transformedpos.y += snoise(float3(pos.yx*((index+1)*10),100+pos.z*((index+1)*10)))*(GrassPatchDist);
+
+	transformedpos = projection(transformedpos,i.vNormalWs);
+	o.vPositionPs = Position4WsToPsMultiview( 0, float4( vPositionWs.xyz+transformedpos+mul(offset.xyz,transmatrix),vPositionWs.w ) );
+	o.vBladeUV = uv;
 	return o;
 }
 
@@ -109,25 +112,36 @@ float getfalloff(float a, float b){
 
 void GenerateGrass(triangle GeometryInput i[3],int index, inout TriangleStream< PS_INPUT > triStream){
 
-    float3 pos = i[index].worldspace.xyz/100;
-	float3 normal = i[index].worldspacenormals.xyz;
-    float3 tangent = i[index].worldspacevTangentUWs.xyz;
+    
+	float4 vPositionWs = mul( g_matProjectionToWorld, i[index].vPositionPs );
+	float3 pos = ((g_vCameraPositionWs)+i[index].vPositionWs.xyz)/100;
+	float3 normal = normalize(i[index].vNormalWs.xyz);
+    float3 tangent = normalize(i[index].vTangentUWs.xyz);
 
-    float3x3 tangentToLocal = g_matViewToProjection;
+	float3 bitangent = cross(normal, tangent.xyz);
+	float3x3 tangentToLocal = float3x3
+	(
+		tangent.x, bitangent.x, normal.x,
+		tangent.y, bitangent.y, normal.y,
+		tangent.z, bitangent.z, normal.z
+	);
+
+    //float3x3 tangentToLocal = g_matViewToProjection;
 
 
-    float3x3 randRotMatrix = angleAxis3x3((rand((pos)*(index+1))*PI_TWO)*RandRotation,float3(0,0,1.0f));
+    float3x3 randRotMatrix = angleAxis3x3((rand((pos)*((index+1)*2))*PI_TWO)*RandRotation,float3(0,0,1.0f));
 
-    float3x3 randBendMatrix = angleAxis3x3((rand(pos.yyx*(index+1))-0.5f)*BendDelta*PI,float3(-1.0f,0,0));
+    float3x3 randBendMatrix = angleAxis3x3((rand((pos.yyx)*((index+1)*2))-0.5f)*BendDelta*PI,float3(-1.0f,0,0));
 
     float2 windUV = (pos.xy/100) * WindMapSTR.xy + WindMapSTR.zw  * WindFrequency * g_flTime;
 	float2 windSample = ((Tex2DLevel(g_tWindMap,windUV, 0).xy * 2) - 1) * length(WindVelocity);
 
 	float3 windAxis = normalize(float3(windSample.x, windSample.y, 0));
 	float3x3 windMatrix = angleAxis3x3(PI * windSample.x, windAxis);
+	//float3x3 windMatrix = angleAxis3x3(0, float3(1,0,0));
 
-    float3x3 baseTransformationMatrix = mul(windMatrix,randRotMatrix);
-	float3x3 tipTransformationMatrix = mul(mul(windMatrix,randBendMatrix),randRotMatrix);
+    float3x3 baseTransformationMatrix = mul(tangentToLocal,randRotMatrix);
+	float3x3 tipTransformationMatrix = mul(tangentToLocal,mul(mul(windMatrix,randBendMatrix),randRotMatrix));
 
 	float falloffamount = GetDistanceFalloff(pos,g_vCameraPositionWs/100,GrassCutoffDistance*0.005,GrassCutoffDistance*0.01,GrassCutoffDistanceFalloff);
 	if(length(i[index].vBlendValues)> 0){
@@ -144,6 +158,9 @@ void GenerateGrass(triangle GeometryInput i[3],int index, inout TriangleStream< 
 		#endif //3
 		#endif //4
 	}
+	if(falloffamount<=0.01){
+		return;
+	}
     float width  = lerp(BladeWidth.x, BladeWidth.y*10, rand(pos.xyz) * GrassFalloff)* falloffamount;
 	float height = lerp(BladeLenght.x, BladeLenght.y*10, rand(pos.yzx) * GrassFalloff)* falloffamount;
 	//float height =  TraceSDF(i[index])*10;
@@ -155,14 +172,15 @@ void GenerateGrass(triangle GeometryInput i[3],int index, inout TriangleStream< 
 		float t = k / (float)BLADE_SEGMENTS;
 		float3 offset = float3(width * (1 - t), pow(t, BladeBendCurve) * forward, height * t ) ;
 		float3x3 transformationMatrix = (k == 0) ? baseTransformationMatrix : tipTransformationMatrix;
-        GSAppendVertex(triStream,TransformGeomToClip(i[index],float3(offset.x, offset.y, offset.z),transformationMatrix ,float2(0,t)));
-	    GSAppendVertex(triStream,TransformGeomToClip(i[index],float3(-offset.x, offset.y, offset.z),transformationMatrix ,float2(1.0f,t)));
+        GSAppendVertex(triStream,TransformGeomToClip(i[index],index,float3(offset.x, offset.y, offset.z),transformationMatrix ,float2(0,t)));
+	    GSAppendVertex(triStream,TransformGeomToClip(i[index],index,float3(-offset.x, offset.y, offset.z),transformationMatrix ,float2(1.0f,t)));
 	}
-	GSAppendVertex(triStream,TransformGeomToClip(i[index],float3(0,forward, height),tipTransformationMatrix,float2(0.5f,1.0f)));
+	GSAppendVertex(triStream,TransformGeomToClip(i[index],index,float3(0,forward, height),tipTransformationMatrix,float2(0.5f,1.0f)));
 	GSRestartStrip( triStream );
 }
 
 #define BLADE_AMOUNT 1
+
 
 
 [maxvertexcount(3+(BLADE_SEGMENTS*2+1)*BLADE_AMOUNT )]
@@ -171,18 +189,18 @@ void MainGs( triangle GeometryInput i[3], inout TriangleStream< PS_INPUT > triSt
 
     [unroll]for( uint l = 0; l < 3; l++)
     {
-        i[l].vTextureCoords = float2(0,0);
-        i[l].vPositionPs = Position3WsToPs(i[l].worldspace+ i[l].worldspacenormals);
+		float4 vPositionWs = mul( g_matProjectionToWorld, i[l].vPositionPs );
+        i[l].vPositionPs = Position4WsToPsMultiview(0,float4( vPositionWs.xyz+(i[l].vNormalWs*0.05),vPositionWs.w));
+		i[l].vBladeUV = float2(0,0);
         GSAppendVertex( triStream, i[l] );
     }
 	GSRestartStrip( triStream );
 
-	if(distance (i[0].worldspace, g_vCameraPositionWs)> GrassCutoffDistance){
+	if(distance (i[0].vPositionWs+g_vCameraPositionWs, g_vCameraPositionWs)> GrassCutoffDistance){
 		return;
 	}
 	[unroll]for( uint j = 0; j < BLADE_AMOUNT; j++)
     {
-		//i[j].vPositionWs = i[j].worldspace;
         GenerateGrass(i,j,triStream);
     }	
 

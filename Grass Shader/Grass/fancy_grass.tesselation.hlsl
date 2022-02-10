@@ -10,7 +10,11 @@
 		HullPatchConstants o;
 
 		float fTessMax = 1.0f;
-		float4 vTess = DistanceBasedTess( patch[0].worldspace, patch[1].worldspace, patch[2].worldspace, 1.0, fTesselationFalloff, sMaxTesselation);
+		float3 p0 = mul( g_matProjectionToWorld, patch[0].vPositionPs ).xyz;
+		float3 p1 = mul( g_matProjectionToWorld, patch[1].vPositionPs ).xyz;
+		float3 p2 = mul( g_matProjectionToWorld, patch[2].vPositionPs ).xyz;
+
+		float4 vTess = DistanceBasedTess( p0, p1,p2, 1.0, fTesselationFalloff, sMaxTesselation);
 		
 		o.Edge[0] = vTess.x;
 		o.Edge[1] = vTess.y;
@@ -106,6 +110,8 @@
 		Baycentric3Interpolate(vNormalWs);
 	#endif
 
+	//o.vNormalWs = patch[0].vNormalWs;
+
 	#if ( S_UV2 )
 		Baycentric3Interpolate(vTextureCoords);
 	#else
@@ -150,11 +156,7 @@
 			o.vClip1 = patch[0].vClip1;
 		#endif
 
-
-		Baycentric3Interpolate(worldspace);
-		Baycentric3Interpolate(worldspacenormals);
-		Baycentric3Interpolate(worldspacevTangentUWs);
-
+		Baycentric3Interpolate(vBladeUV);
 		Baycentric3Interpolate(vBlendValues);
 		Baycentric3Interpolate(vPaintValues);
 		Baycentric3Interpolate(vGrassValues);
