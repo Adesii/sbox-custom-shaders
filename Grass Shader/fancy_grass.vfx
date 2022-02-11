@@ -21,6 +21,15 @@ FEATURES
 
 	Feature(F_TRIPLANAR_GROUND, 0..2(0="UV Blend",1="Color", 2="Triplanar"), "Ground");
 
+	Feature(F_USE_BLADE_TEXTURE_AS_COLOR, 0..1, "Grass");
+    Feature( F_PREPASS_ALPHA_TEST, 0..1 );
+
+
+
+	Feature( F_ALPHA_TEST, 0..1, "Rendering" );
+    Feature( F_ALPHA_CULLING, 0..1, "Rendering" );
+	FeatureRule( Requires1( F_ALPHA_CULLING, F_ALPHA_TEST ), "Requires alpha testing" );
+
 	
 	//Feature( F_HIGH_QUALITY_REFLECTIONS, 0..1, "Rendering" );
 
@@ -79,7 +88,6 @@ COMMON
 	#define S_METALNESS_TEXTURE 0
 	#define S_SPECULAR_CUBE_MAP 1
 	#define S_TRANSLUCENT 0
-	#define S_ALPHA_TEST 0
 
 	//#define D_BAKED_LIGHTING_FROM_PROBE 1
 }
@@ -203,6 +211,7 @@ GS
 {
 	StaticCombo( S_MULTIBLEND, F_MULTIBLEND, Sys( PC ) );
 	//StaticCombo( S_HIGH_QUALITY_REFLECTIONS, F_HIGH_QUALITY_REFLECTIONS, Sys( PC ) ); // Indicate that Shader supports high quality reflections
+	StaticCombo(S_USE_BLADE_TEXTURE,F_USE_BLADE_TEXTURE_AS_COLOR,Sys(PC));
 	#include "Grass/fancy_grass.Geometry.hlsl"
 }
 
@@ -221,7 +230,9 @@ PS
     //StaticCombo( S_USE_TINT_MASKS_IN_VERTEX_PAINT, F_USE_TINT_MASKS_IN_VERTEX_PAINT, Sys( PC ) );
 
 
-    #include "common/pixel.hlsl"
+	StaticCombo( S_ALPHA_TEST, F_ALPHA_TEST, Sys( ALL ) );
+
+
 	#include "common/pixel.blend.hlsl"
 
 	RenderState( BlendEnable,  false );
@@ -240,6 +251,7 @@ PS
 
 
 	StaticCombo( S_TRIPLANAR, F_TRIPLANAR_GROUND, Sys( PC ) );
+	StaticCombo(S_USE_BLADE_TEXTURE,F_USE_BLADE_TEXTURE_AS_COLOR,Sys(PC));
 
 	CreateInputTexture2D(BladeTexture,Srgb,8,"","_color","Blade,10/Colors,10/1",Default3( 1.0, 1.0, 1.0 ) );
 	CreateTexture2DWithoutSampler( g_tBladeTexture )  < Channel( RGBA,  Box( BladeTexture ), Srgb ); OutputFormat( BC7 ); SrgbRead( true ); >;
@@ -262,15 +274,36 @@ PS
 		#if S_TRIPLANAR == 0
 			Material m = ToMaterialMultiblend(i.vTextureCoords,i);
 		#elif S_TRIPLANAR == 1
-			Material m = ToMaterial(float4(BaseColor,1),Tex2DS( g_tNormal, TextureFiltering, i.vTextureCoords  ),float4(1,0,1,0));
+			Material m = ToMaterial(float4(Tex2DS(g_tColorA,TextureFiltering,i.vTextureCoords).rgb,1),Tex2DS( g_tNormalA, TextureFiltering, i.vTextureCoords  ),float4(1,0,1,0));
 		#else
 			Material m = TriplanarToMaterialMultiblend(i);
 		#endif
 
 
 		if(i.vBladeUV.x != 0 && i.vBladeUV.y != 0){
-			m.Albedo = Tex2DS( g_tBladeTexture, TextureFiltering, i.vBladeUV  ), 
-			m.Albedo *= saturate( lerp( BaseColor, TipColor, clamp(i.vBladeUV.y,0,1) ));
+			float4 vAlbedo = Tex2DS( g_tBladeTexture, TextureFiltering, i.vBladeUV  ); 
+			#if S_USE_BLADE_TEXTURE == 0
+				vAlbedo.a = 1;
+			#endif
+			#if S_ALPHA_TEST
+				if( vAlbedo.a < g_flAlphaTestReference )
+				{
+					discard;
+				}
+			#endif
+			#if S_USE_BLADE_TEXTURE == 0
+				vAlbedo.rgb *= saturate( lerp(  TipColor,BaseColor, clamp(i.vBladeUV.y,0,1) )).rgb;
+			#else
+				vAlbedo.rgb *= saturate(BaseColor).rgb;
+			#endif
+
+			m.Albedo = vAlbedo;
+			#if S_ALPHA_TEST
+				m.Opacity = vAlbedo.a;
+			#else
+				m.Opacity = 1.0f;
+			#endif
+
 		}
 
 		return FinalizePixelMaterial( i, m );

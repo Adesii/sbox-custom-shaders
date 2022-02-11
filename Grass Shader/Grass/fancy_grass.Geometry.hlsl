@@ -73,7 +73,7 @@ PS_INPUT TransformGeomToClip(GeometryInput i,int index,float3 offset,float3x3 tr
 	PS_INPUT o = (PS_INPUT)i;
 	float3 transformedpos = float3(0,0,0);
 	float4 vPositionWs = mul( g_matProjectionToWorld, i.vPositionPs );
-	float3 pos = (i.vPositionWs+g_vCameraPositionWs)/100;
+	float3 pos = ((i.vPositionWs.xyz*vPositionWs.w)+g_vCameraPositionWs)/100;
 	transformedpos.x += snoise(float3(pos.xy*((index+1)*10),pos.z*((index+1)*10)))*(GrassPatchDist);
 	transformedpos.y += snoise(float3(pos.yx*((index+1)*10),100+pos.z*((index+1)*10)))*(GrassPatchDist);
 
@@ -161,8 +161,13 @@ void GenerateGrass(triangle GeometryInput i[3],int index, inout TriangleStream< 
 	if(falloffamount<=0.01){
 		return;
 	}
+	#if S_USE_BLADE_TEXTURE == 0
     float width  = lerp(BladeWidth.x, BladeWidth.y*10, rand(pos.xyz) * GrassFalloff)* falloffamount;
 	float height = lerp(BladeLenght.x, BladeLenght.y*10, rand(pos.yzx) * GrassFalloff)* falloffamount;
+	#else
+	float width  = lerp(BladeWidth.x, BladeWidth.y*10, rand(pos.xyz) * GrassFalloff)* falloffamount;
+	float height = width;
+	#endif
 	//float height =  TraceSDF(i[index])*10;
 	float forward = rand(pos.zzy) * BladeBendDistance;
 
@@ -170,22 +175,65 @@ void GenerateGrass(triangle GeometryInput i[3],int index, inout TriangleStream< 
     for (int k = 0; k < BLADE_SEGMENTS; ++k)
 	{
 		float t = k / (float)BLADE_SEGMENTS;
-		float3 offset = float3(width * (1 - t), pow(t, BladeBendCurve) * forward, height * t ) ;
+		#if S_USE_BLADE_TEXTURE == 1
+			float3 offset = float3(width, pow(t, BladeBendCurve) * forward, height * t ) ;
+		#else
+			float3 offset = float3(width * (1 - t), pow(t, BladeBendCurve) * forward, height * t ) ;
+		#endif
+
 		float3x3 transformationMatrix = (k == 0) ? baseTransformationMatrix : tipTransformationMatrix;
-        GSAppendVertex(triStream,TransformGeomToClip(i[index],index,float3(offset.x, offset.y, offset.z),transformationMatrix ,float2(0,t)));
-	    GSAppendVertex(triStream,TransformGeomToClip(i[index],index,float3(-offset.x, offset.y, offset.z),transformationMatrix ,float2(1.0f,t)));
+        GSAppendVertex(triStream,TransformGeomToClip(i[index],index,float3(offset.x, offset.y, offset.z),transformationMatrix ,float2(0,1-t)));
+	    GSAppendVertex(triStream,TransformGeomToClip(i[index],index,float3(-offset.x, offset.y, offset.z),transformationMatrix ,float2(1.0f,1-t)));
 	}
-	GSAppendVertex(triStream,TransformGeomToClip(i[index],index,float3(0,forward, height),tipTransformationMatrix,float2(0.5f,1.0f)));
+	#if S_USE_BLADE_TEXTURE == 0
+		GSAppendVertex(triStream,TransformGeomToClip(i[index],index,float3(0,forward, height),tipTransformationMatrix,float2(0.5f,0)));
+	#endif
 	GSRestartStrip( triStream );
 }
 
 #define BLADE_AMOUNT 1
+
+bool FustrumCull( float4 vPositionPs0, float4 vPositionPs1, float4 vPositionPs2 )
+    {
+        // Discard if all the vertices are behind the near plane
+        if ( ( vPositionPs0.z < 0.0 ) && ( vPositionPs1.z < 0.0 ) && ( vPositionPs2.z < 0.0 ) )
+            return true;
+
+        // Discard if all the vertices are behind the far plane
+        if ( ( vPositionPs0.z > vPositionPs0.w ) && ( vPositionPs1.z > vPositionPs1.w ) && ( vPositionPs2.z > vPositionPs2.w ) )
+        	return true;
+
+        // Discard if all the vertices are outside one of the frustum sides
+        if ( vPositionPs0.x < -vPositionPs0.w-40 &&
+        	 vPositionPs1.x < -vPositionPs1.w-40 &&
+        	 vPositionPs2.x < -vPositionPs2.w-40 )
+        	 return true;
+        if ( vPositionPs0.y < -vPositionPs0.w-40 &&
+        	 vPositionPs1.y < -vPositionPs1.w-40 &&
+        	 vPositionPs2.y < -vPositionPs2.w-40 )
+        	 return true;
+        if ( vPositionPs0.x > vPositionPs0.w+40 &&
+        	 vPositionPs1.x > vPositionPs1.w+40 &&
+        	 vPositionPs2.x > vPositionPs2.w+40 )
+        	 return true;
+        if ( vPositionPs0.y > vPositionPs0.w+40 &&
+        	 vPositionPs1.y > vPositionPs1.w+40 &&
+        	 vPositionPs2.y > vPositionPs2.w+40 )
+        	 return true;
+
+        return false;
+    }
 
 
 
 [maxvertexcount(3+(BLADE_SEGMENTS*2+1)*BLADE_AMOUNT )]
 void MainGs( triangle GeometryInput i[3], inout TriangleStream< PS_INPUT > triStream )
 {
+
+	if( FustrumCull(i[0].vPositionPs, i[1].vPositionPs, i[2].vPositionPs) )
+    {
+        return;
+    }
 
     [unroll]for( uint l = 0; l < 3; l++)
     {

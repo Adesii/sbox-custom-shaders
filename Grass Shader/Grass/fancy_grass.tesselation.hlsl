@@ -1,8 +1,13 @@
 #if ( PROGRAM == VFX_PROGRAM_HS )
-	int sMaxTesselation< UiGroup("Blade,10/Tessellation"); UiType(Slider); Default(6); Range(1, 50); >;
-	#ifdef DISTANCE_BASED_TESS
-		float fTesselationFalloff< UiGroup("Blade,10/Tessellation"); UiType(Slider); Default(3000); Range(1, 8192); >;
-	#endif
+
+
+
+	
+	int MaxTesselation< UiGroup("Blade,10/Tessellation"); UiType(Slider); Default(6); Range(1, 10); >;
+
+	float TesselationFalloff< UiGroup("Blade,10/Tessellation"); UiType(Slider); Default(3000); Range(1, 8192); >;
+	float MinTesselationFalloff< UiGroup("Blade,10/Tessellation"); UiType(Slider); Default(1); Range(1, 8192); >;
+
 
 	PatchSize( 3 );
 	HullPatchConstants TessellationFunc(InputPatch<HullInput, 3> patch)
@@ -14,7 +19,7 @@
 		float3 p1 = mul( g_matProjectionToWorld, patch[1].vPositionPs ).xyz;
 		float3 p2 = mul( g_matProjectionToWorld, patch[2].vPositionPs ).xyz;
 
-		float4 vTess = DistanceBasedTess( p0, p1,p2, 1.0, fTesselationFalloff, sMaxTesselation);
+		float4 vTess = DistanceBasedTess( p0, p1,p2, MinTesselationFalloff, TesselationFalloff, MaxTesselation);
 		
 		o.Edge[0] = vTess.x;
 		o.Edge[1] = vTess.y;
