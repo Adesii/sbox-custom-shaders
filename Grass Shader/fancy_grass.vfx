@@ -19,7 +19,7 @@ FEATURES
 	//Feature( F_ALPHA_TEST, 0..1, "Rendering" );
     //Feature( F_TRANSMISSIVE, 0..1, "Rendering" );
 
-	Feature(F_TRIPLANAR_GROUND, 0..2(0="UV Blend",1="Color", 2="Triplanar"), "Ground");
+	Feature(F_USE_UV, 0..1, "Ground");
 
 	Feature(F_USE_BLADE_TEXTURE_AS_COLOR, 0..1, "Grass");
     Feature( F_PREPASS_ALPHA_TEST, 0..1 );
@@ -27,14 +27,14 @@ FEATURES
 
 
 	Feature( F_ALPHA_TEST, 0..1, "Rendering" );
-    Feature( F_ALPHA_CULLING, 0..1, "Rendering" );
-	FeatureRule( Requires1( F_ALPHA_CULLING, F_ALPHA_TEST ), "Requires alpha testing" );
+    /* Feature( F_ALPHA_CULLING, 0..1, "Rendering" );
+	FeatureRule( Requires1( F_ALPHA_CULLING, F_ALPHA_TEST ), "Requires alpha testing" ); */
 
 	
 	//Feature( F_HIGH_QUALITY_REFLECTIONS, 0..1, "Rendering" );
 
 	// 5 layers puts too much pressure into registers, I'm keeping it to 4 but modders can experiment with it
-    Feature( F_MULTIBLEND, 0..3 ( 0="1 Layers", 1="2 Layers", 2="3 Layers", 3="4 Layers" ), "Number Of Blendable Layers" );
+    Feature( F_MULTIBLEND, 0..2 ( 0="1 Layers", 1="2 Layers", 2="3 Layers", 3="4 Layers" ), "Number Of Blendable Layers" );
 	//Feature( F_USE_TINT_MASKS_IN_VERTEX_PAINT, 0..1, "Use Tint Masks In Vertex Paint" );
 }
 
@@ -82,11 +82,6 @@ COMMON
 	#define DISTANCE_BASED_TESS 1
 	#define NO_TESSELATION 0
 
-	#define ENABLE_BINDLESS_RUNTIME
-	#define S_GGX_SHADING 1
-	#define S_SPECULAR 1
-	#define S_METALNESS_TEXTURE 0
-	#define S_SPECULAR_CUBE_MAP 1
 	#define S_TRANSLUCENT 0
 
 	//#define D_BAKED_LIGHTING_FROM_PROBE 1
@@ -155,9 +150,9 @@ VS
 	float g_flGrassModifierC < Default( 1 ); Range( 0, 1.0 ); UiGroup( "Material C,90" ); >;
 	#if S_MULTIBLEND >= 3
 	float g_flGrassModifierD < Default( 1 ); Range( 0, 1.0 ); UiGroup( "Material D,90" ); >;
-	#if S_MULTIBLEND >= 4
+	/* #if S_MULTIBLEND >= 4
 	float g_flGrassModifierE < Default( 1 ); Range( 0, 1.0 ); UiGroup( "Material E,90" ); >;
-	#endif
+	#endif */
 	#endif
 	#endif
 	#endif
@@ -183,9 +178,9 @@ VS
 		o.vGrassValues.y = g_flGrassModifierC;
 		#if S_MULTIBLEND >= 3
 		o.vGrassValues.z = g_flGrassModifierD;
-		#if S_MULTIBLEND >= 4
+		/* #if S_MULTIBLEND >= 4
 		o.vGrassValues.w = g_flGrassModifierE;
-		#endif
+		#endif */
 		#endif
 		#endif
 		#endif
@@ -212,6 +207,7 @@ GS
 	StaticCombo( S_MULTIBLEND, F_MULTIBLEND, Sys( PC ) );
 	//StaticCombo( S_HIGH_QUALITY_REFLECTIONS, F_HIGH_QUALITY_REFLECTIONS, Sys( PC ) ); // Indicate that Shader supports high quality reflections
 	StaticCombo(S_USE_BLADE_TEXTURE,F_USE_BLADE_TEXTURE_AS_COLOR,Sys(PC));
+	#include "Grass/fancy_grass.Shared.hlsl"
 	#include "Grass/fancy_grass.Geometry.hlsl"
 }
 
@@ -231,7 +227,8 @@ PS
 
 
 	StaticCombo( S_ALPHA_TEST, F_ALPHA_TEST, Sys( ALL ) );
-
+	#define COMMON_PIXEL_MATERIAL_INPUTS_H
+	#define COMMON_PIXEL_MATERIAL_HELPERS_H
 
 	#include "common/pixel.blend.hlsl"
 
@@ -242,7 +239,7 @@ PS
 	RenderState(CullMode,NONE);
 
 
-	RenderState( DepthBias, -10 ); // Value is steps in depth buffer (i.e. out of 2^24 if the depth buffer is 24 bit)
+	RenderState( DepthBias, -15 ); // Value is steps in depth buffer (i.e. out of 2^24 if the depth buffer is 24 bit)
 	RenderState( SlopeScaleDepthBias, -0.2 );
 
 
@@ -250,7 +247,7 @@ PS
 	//StaticCombo( S_HIGH_QUALITY_REFLECTIONS, F_HIGH_QUALITY_REFLECTIONS, Sys( PC ) ); // Indicate that Shader supports high quality reflections
 
 
-	StaticCombo( S_TRIPLANAR, F_TRIPLANAR_GROUND, Sys( PC ) );
+	StaticCombo( S_TRIPLANAR, F_USE_UV, Sys( PC ) );
 	StaticCombo(S_USE_BLADE_TEXTURE,F_USE_BLADE_TEXTURE_AS_COLOR,Sys(PC));
 
 	CreateInputTexture2D(BladeTexture,Srgb,8,"","_color","Blade,10/Colors,10/1",Default3( 1.0, 1.0, 1.0 ) );
@@ -265,46 +262,73 @@ PS
 
 	#include "Grass/fancy_grass.blend.hlsl"
 
+	/* #include "Grass/fancy_grass.Shared.hlsl" */
+
+
+	PixelOutput FinalizePixelMaterial( PixelInput i, Material m )
+	{
+	    CombinerInput o = MaterialToCombinerInput( i, m );
+	
+	    return FinalizePixel( o );
+	}
+
+	BoolAttribute( SupportsLightmapping, false  );
+
 	//
 	// Main
 	//
 	PixelOutput MainPs( PixelInput i )
 	{
-		//Material m = GatherMaterial(i);
-		#if S_TRIPLANAR == 0
-			Material m = ToMaterialMultiblend(i.vTextureCoords,i);
-		#elif S_TRIPLANAR == 1
-			Material m = ToMaterial(float4(Tex2DS(g_tColorA,TextureFiltering,i.vTextureCoords).rgb,1),Tex2DS( g_tNormalA, TextureFiltering, i.vTextureCoords  ),float4(1,0,1,0));
-		#else
-			Material m = TriplanarToMaterialMultiblend(i);
-		#endif
 
-
+		
+		
 		if(i.vBladeUV.x != 0 && i.vBladeUV.y != 0){
 			float4 vAlbedo = Tex2DS( g_tBladeTexture, TextureFiltering, i.vBladeUV  ); 
 			#if S_USE_BLADE_TEXTURE == 0
 				vAlbedo.a = 1;
-			#endif
-			#if S_ALPHA_TEST
-				if( vAlbedo.a < g_flAlphaTestReference )
-				{
-					discard;
-				}
-			#endif
-			#if S_USE_BLADE_TEXTURE == 0
 				vAlbedo.rgb *= saturate( lerp(  TipColor,BaseColor, clamp(i.vBladeUV.y,0,1) )).rgb;
 			#else
 				vAlbedo.rgb *= saturate(BaseColor).rgb;
 			#endif
 
-			m.Albedo = vAlbedo;
+			Material b;
+			b.Albedo = vAlbedo.rgb;
+        	b.Normal = float3(0.5f,0.5f,1).rgb;
+        	b.Emission = float3(0, 0, 0).rgb;
+        	b.Roughness = 0;
+        	b.Metalness = 0;
+        	b.AmbientOcclusion = 1;
+        	b.BlendMask = 0.0f;
+        	b.TintMask = 0.0f;
+        	b.TransmissiveMask = float3( 0.0f, 0.0f, 0.0f ).rgb;
+
 			#if S_ALPHA_TEST
-				m.Opacity = vAlbedo.a;
+				b.Opacity = vAlbedo.a;
 			#else
-				m.Opacity = 1.0f;
+				b.Opacity = 1.0f;
 			#endif
+			//b.Albedo = SampleSplash(i.vPositionWithOffsetWs.xy).r;
+
+			CombinerInput o = MaterialToCombinerInput( i, b );
+
+			return FinalizePixel( o );
 
 		}
+
+		//PixelOutput o;
+		//o.vColor.rgb = 0.4;
+		//o.vColor.a = 1;
+		//return o;
+		//Material m = GatherMaterial(i);
+		#if S_TRIPLANAR == 0
+			Material m = ToMaterialMultiblend(i.vTextureCoords,i);
+		#else
+			Material m = ToMaterial(float4(Tex2DS(g_tColorA,TextureFiltering,i.vTextureCoords).rgb,1),Tex2DS( g_tNormalA, TextureFiltering, i.vTextureCoords  ),Tex2DS(g_tRmaA,TextureFiltering,i.vTextureCoords));
+		#endif
+
+		//m.Albedo = SampleLightDirect(i.vPositionWithOffsetWs.xyz);
+
+
 
 		return FinalizePixelMaterial( i, m );
 	}
