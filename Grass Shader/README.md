@@ -5,4 +5,5 @@ https://www.youtube.com/watch?v=MeyW_aYE82s
 it was a great learning experience and this shader wouldn't have been possible without their great explanation of shaders.
 
 # Notice:
-The mesh that this Shader is applied to needs to have BakeLighting Disabled otherwise the whole mesh will just be black. Waiting for Sam to push the sunlight rework. but until then you'll need to disable that on each mesh using this shader
+The Shader is sampling lightprobes and isn't using the Lightmap because of Issues with Tessellation and Lightmaps. so make sure there is a lightprobe around the mesh so it can accurately sample light data.
+this will hopefully be a option later on once i figure out how to fix the lightmap data uv's
