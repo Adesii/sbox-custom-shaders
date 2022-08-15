@@ -227,9 +227,8 @@ PS
 
 
 	StaticCombo( S_ALPHA_TEST, F_ALPHA_TEST, Sys( ALL ) );
-	#define COMMON_PIXEL_MATERIAL_INPUTS_H
-	#define COMMON_PIXEL_MATERIAL_HELPERS_H
 
+	#include "common/pixel.hlsl"
 	#include "common/pixel.blend.hlsl"
 
 	RenderState( BlendEnable,  false );
@@ -260,19 +259,12 @@ PS
 	//}
 	//#endif
 
+	
 	#include "Grass/fancy_grass.blend.hlsl"
 
 	/* #include "Grass/fancy_grass.Shared.hlsl" */
 
-
-	PixelOutput FinalizePixelMaterial( PixelInput i, Material m )
-	{
-	    CombinerInput o = MaterialToCombinerInput( i, m );
-	
-	    return FinalizePixel( o );
-	}
-
-	BoolAttribute( SupportsLightmapping, false  );
+	//BoolAttribute( SupportsLightmapping, false  );
 
 	//
 	// Main
@@ -291,16 +283,7 @@ PS
 				vAlbedo.rgb *= saturate(BaseColor).rgb;
 			#endif
 
-			Material b;
-			b.Albedo = vAlbedo.rgb;
-        	b.Normal = float3(0.5f,0.5f,1).rgb;
-        	b.Emission = float3(0, 0, 0).rgb;
-        	b.Roughness = 0;
-        	b.Metalness = 0;
-        	b.AmbientOcclusion = 1;
-        	b.BlendMask = 0.0f;
-        	b.TintMask = 0.0f;
-        	b.TransmissiveMask = float3( 0.0f, 0.0f, 0.0f ).rgb;
+			Material b = ToMaterial(i,vAlbedo.rgba,float4(0.5f,0.5f,1,0),float4(0,0,1,0));
 
 			#if S_ALPHA_TEST
 				b.Opacity = vAlbedo.a;
@@ -309,9 +292,7 @@ PS
 			#endif
 			//b.Albedo = SampleSplash(i.vPositionWithOffsetWs.xy).r;
 
-			CombinerInput o = MaterialToCombinerInput( i, b );
-
-			return FinalizePixel( o );
+			return FinalizePixelMaterial( i, b );
 
 		}
 
@@ -323,13 +304,13 @@ PS
 		#if S_TRIPLANAR == 0
 			Material m = ToMaterialMultiblend(i.vTextureCoords,i);
 		#else
-			Material m = ToMaterial(float4(Tex2DS(g_tColorA,TextureFiltering,i.vTextureCoords).rgb,1),Tex2DS( g_tNormalA, TextureFiltering, i.vTextureCoords  ),Tex2DS(g_tRmaA,TextureFiltering,i.vTextureCoords));
+			Material m = ToMaterial(i,float4(Tex2DS(g_tColorA,TextureFiltering,i.vTextureCoords).rgb,1),Tex2DS( g_tNormalA, TextureFiltering, i.vTextureCoords  ),Tex2DS(g_tRmaA,TextureFiltering,i.vTextureCoords));
 		#endif
 
 		//m.Albedo = SampleLightDirect(i.vPositionWithOffsetWs.xyz);
 
 
 
-		return FinalizePixelMaterial( i, m );
+		return FinalizePixelMaterial( i, m);
 	}
 }

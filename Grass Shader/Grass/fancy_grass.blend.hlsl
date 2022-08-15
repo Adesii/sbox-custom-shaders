@@ -28,7 +28,7 @@ float TextureScale < Default( 10 ); Range( 0, 1000.0 ); UiGroup( "Triplanar,90" 
 			float4 dif = xDiff * blendWeights.x + yDiff * blendWeights.y + zDiff * blendWeights.z;
 			float4 norms = xNorm * blendWeights.x + yNorm * blendWeights.y + zNorm * blendWeights.z;
 			float4 rough = xRma * blendWeights.x + yRma * blendWeights.y + zRma * blendWeights.z;
-			return ToMaterial(dif,norms,rough,tintcolor);
+			return ToMaterial(i,dif,norms,rough,tintcolor);
 
 	}
 
